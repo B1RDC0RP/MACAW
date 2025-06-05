@@ -1,7 +1,20 @@
 # MACAW
-MACAW is a glitch art/databending software designed to recreate the effect of applying audio effects to image data.
 
-MACAW aims to provide a more user friendly and scalable approach than using programs such as audacity.
+**MACAW** is a databending/glitch art tool that converts images into audio waveforms, processes them with audio effects then converts them back to images, inspired by classic audio-editing glitch workflows, but designed for usability and scale.
+
+---
+
+## Features
+
+- Apply highpass, echo, reverb, or distortion
+- Fully automated, no manual Audacity steps
+
+---
+
+## Installation
+
+```bash
+pip install -r requirements.txt
 
 
 
