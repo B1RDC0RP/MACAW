@@ -12,6 +12,11 @@ from datetime import datetime
 # Choose: "highpass", "reverb", "distortion", or "echo"
 SELECTED_EFFECT = "echo"
 
+# ====================== Base directories for portability ======================
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+INPUT_FOLDER = os.path.join(BASE_DIR, "input")
+OUTPUT_FOLDER_ROOT = os.path.join(BASE_DIR, "output")
+
 # ====================== μ-law Encoding ======================
 
 @njit
@@ -62,27 +67,15 @@ def apply_highpass_filter_to_buffer(wave_buffer, cutoff_freq=1200.0, sample_rate
 def apply_reverb_to_buffer(wave_buffer, decay=0.5, sample_rate=44100, num_reflections=50):
     data, sr = sf.read(wave_buffer)
     
-    # Length of impulse response in samples
     ir_length = int(sample_rate * decay)
-    
-    # Create an exponentially decaying impulse response with multiple reflections
     ir = np.zeros(ir_length)
-    
-    # Spread reflections evenly over the IR length
     reflection_positions = np.linspace(0, ir_length - 1, num_reflections, dtype=int)
     
-    # Exponential decay factor for amplitude of reflections
     for i, pos in enumerate(reflection_positions):
-        # Amplitude decays exponentially over reflections
         ir[pos] = np.exp(-3 * (i / num_reflections))
     
-    # Normalize IR so max amplitude is 1
     ir /= np.max(np.abs(ir))
-    
-    # Convolve audio with IR to add reverb
     convolved = scipy.signal.fftconvolve(data, ir, mode='full')[:len(data)]
-    
-    # Normalize output to prevent clipping
     convolved = convolved / np.max(np.abs(convolved)) * 0.9
     
     return save_to_buffer(convolved, sample_rate)
@@ -96,24 +89,16 @@ def apply_echo_to_buffer(wave_buffer, delay_seconds=0.01, decay=1.5, repeats=10,
     data, sr = sf.read(wave_buffer)
     delay_samples = int(delay_seconds * sample_rate)
     
-    # Prepare output array, larger to hold echoes
     output_length = len(data) + delay_samples * repeats
     output = np.zeros(output_length)
-    
-    # Copy original signal to output start
     output[:len(data)] = data
     
-    # Add multiple echoes
     for i in range(1, repeats + 1):
         start = delay_samples * i
         end = start + len(data)
-        
-        # Add delayed and decayed signal
         output[start:end] += data * (decay ** i)
     
-    # Normalize output to prevent clipping
     output = output / np.max(np.abs(output)) * 0.9
-    
     return save_to_buffer(output, sample_rate)
 
 def save_to_buffer(audio_array, sample_rate):
@@ -124,7 +109,7 @@ def save_to_buffer(audio_array, sample_rate):
 
 # ====================== Reconstruct BMP ======================
 
-def wave_buffer_to_bmp(filtered_buffer, header, output_path):
+def wave_buffer_to_high_quality_jpeg(filtered_buffer, header, output_path_jpeg):
     data, sr = sf.read(filtered_buffer)
 
     if data.dtype != np.uint8:
@@ -134,14 +119,15 @@ def wave_buffer_to_bmp(filtered_buffer, header, output_path):
     else:
         pixel_data = data
 
-    with open(output_path, 'wb') as out:
-        out.write(header)
-        out.write(pixel_data)
+    bmp_bytes = header + pixel_data.tobytes()
+
+    with BytesIO(bmp_bytes) as bmp_stream:
+        img = Image.open(bmp_stream).convert("RGB")
+        img.save(output_path_jpeg, "JPEG", quality=100, subsampling=0, optimize=True, progressive=True)
 
 # ====================== Pipeline ======================
 
-def run_databending_pipeline_multiple_filters(input_path, effect_values):
-    # Convert input to BMP
+def run_databending_pipeline_multiple_filters(input_path, effect_values, output_root):
     if input_path.lower().endswith(".jpg") or input_path.lower().endswith(".jpeg"):
         bmp_path = input_path.replace(".jpg", ".bmp").replace(".jpeg", ".bmp")
         print(f"Converting {input_path} to BMP...")
@@ -155,12 +141,10 @@ def run_databending_pipeline_multiple_filters(input_path, effect_values):
     print("Converting pixel data to μ-law waveform in memory...")
     wave_buffer = image_bytes_to_ulaw_wave_buffer(pixel_data)
 
-    # Create output folder
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    output_folder = os.path.join("output", timestamp)
+    output_folder = os.path.join(output_root, timestamp)
     os.makedirs(output_folder, exist_ok=True)
 
-    # Apply selected effect
     for i, param in enumerate(effect_values, start=1):
         print(f"\n=== Pass {i}: Applying {SELECTED_EFFECT} @ {param} ===")
         buffer_copy = BytesIO(wave_buffer.getvalue())
@@ -176,14 +160,13 @@ def run_databending_pipeline_multiple_filters(input_path, effect_values):
         else:
             raise ValueError(f"Unsupported effect: {SELECTED_EFFECT}")
 
-        output_filename = f"{output_folder}/{SELECTED_EFFECT}_{param}.bmp"
-        wave_buffer_to_bmp(processed, header, output_filename)
-        print(f"Saved: {output_filename}")
+        output_filename_jpeg = os.path.join(output_folder, f"{SELECTED_EFFECT}_{param}.jpg")
+        wave_buffer_to_high_quality_jpeg(processed, header, output_filename_jpeg)
+        print(f"Saved JPEG: {output_filename_jpeg}")
 
 # ====================== Example ======================
 
 if __name__ == "__main__":
-    # Set these based on your effect:
     if SELECTED_EFFECT == "highpass":
         effect_values = [0.5, 1, 3, 5, 7, 10, 20, 50, 100, 1000, 10000]
     elif SELECTED_EFFECT == "reverb":
@@ -195,7 +178,8 @@ if __name__ == "__main__":
     else:
         raise ValueError("Set SELECTED_EFFECT to a valid value.")
 
-    run_databending_pipeline_multiple_filters("input/input85.jpg", effect_values)
+    input_file = os.path.join(INPUT_FOLDER, "input85.jpg")
+    run_databending_pipeline_multiple_filters(input_file, effect_values, OUTPUT_FOLDER_ROOT)
 
 
 
